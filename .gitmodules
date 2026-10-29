@@ -1,0 +1,6 @@
+[submodule "hydra"]
+	path = hydra
+	url = https://github.com/randomidiot13/hydra.git
+[submodule "perfect-tetris"]
+	path = perfect-tetris
+	url = https://github.com/TemariVirus/perfect-tetris.git
