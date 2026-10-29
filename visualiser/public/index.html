@@ -1,0 +1,202 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>PC Visualiser</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <header class="topbar">
+    <div class="brand">
+      <svg class="logo" viewBox="0 0 24 24" aria-hidden="true">
+        <rect x="2" y="13" width="5" height="5" rx="1.2" fill="var(--piece-L)"/>
+        <rect x="7" y="13" width="5" height="5" rx="1.2" fill="var(--piece-L)"/>
+        <rect x="12" y="13" width="5" height="5" rx="1.2" fill="var(--piece-L)"/>
+        <rect x="12" y="8" width="5" height="5" rx="1.2" fill="var(--piece-L)"/>
+        <rect x="17" y="13" width="5" height="5" rx="1.2" fill="var(--piece-I)"/>
+        <rect x="17" y="8" width="5" height="5" rx="1.2" fill="var(--piece-I)"/>
+        <rect x="17" y="3" width="5" height="5" rx="1.2" fill="var(--piece-I)"/>
+      </svg>
+      <span>PC Visualiser</span>
+      <span class="tag">offline · 200 pieces</span>
+    </div>
+    <div id="serverStatus" class="server-status" title="Strategy runner status">
+      <span class="dot"></span><span class="label">Checking runner…</span>
+    </div>
+  </header>
+
+  <main class="layout">
+    <!-- Inputs -->
+    <aside class="panel left">
+      <section class="card">
+        <h2>Strategy</h2>
+        <label id="dropzone" class="dropzone" tabindex="0">
+          <input id="fileInput" type="file" accept=".cpp,.cc,.cxx,.c++,.h,.hpp,text/x-c++src" hidden>
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 16V4m0 0-4 4m4-4 4 4M5 15v3a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2v-3" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></svg>
+          <span class="dz-title" id="dzTitle">Drop a <code>.cpp</code> strategy</span>
+          <span class="dz-sub" id="dzSub">or click to browse</span>
+        </label>
+        <button id="useExample" class="link-btn" type="button">Use the example strategy (basic.cpp)</button>
+
+        <div class="field">
+          <span class="field-label">Piece sequence</span>
+          <div class="segmented" role="tablist">
+            <button type="button" data-seq="seed" class="active">Seeded 7-bag</button>
+            <button type="button" data-seq="custom">Custom</button>
+          </div>
+        </div>
+        <div class="field" id="seedField">
+          <span class="field-label">Seed</span>
+          <div class="input-row">
+            <input id="seed" type="number" min="0" value="1">
+            <button id="randomSeed" class="icon-btn" type="button" title="Random seed" aria-label="Random seed">
+              <svg viewBox="0 0 24 24"><rect x="4" y="4" width="16" height="16" rx="3.5" fill="none" stroke="currentColor" stroke-width="1.6"/><circle cx="9" cy="9" r="1.3" fill="currentColor"/><circle cx="15" cy="15" r="1.3" fill="currentColor"/><circle cx="15" cy="9" r="1.3" fill="currentColor"/><circle cx="9" cy="15" r="1.3" fill="currentColor"/></svg>
+            </button>
+          </div>
+        </div>
+        <div class="field hidden" id="customField">
+          <span class="field-label">Queue <span class="muted" id="customCount">0 pieces</span></span>
+          <textarea id="customQueue" rows="3" spellcheck="false" placeholder="IOTLJSZ TSZOIJL …"></textarea>
+        </div>
+        <div class="grid-2">
+          <label class="field">
+            <span class="field-label">Length</span>
+            <input id="length" type="number" min="1" max="2000" value="200">
+          </label>
+          <label class="field">
+            <span class="field-label">Height cap</span>
+            <select id="cap">
+              <option value="0">None</option>
+              <option value="4">4 rows</option>
+              <option value="6">6 rows</option>
+            </select>
+          </label>
+          <label class="field">
+            <span class="field-label">Time limit (s)</span>
+            <input id="timeout" type="number" min="1" max="600" value="60">
+          </label>
+          <div class="field">
+            <span class="field-label">Hold</span>
+            <label class="switch"><input id="hold" type="checkbox" checked><span></span><em>Enabled</em></label>
+          </div>
+        </div>
+        <button id="runBtn" class="primary" type="button" disabled>
+          <span class="spinner" aria-hidden="true"></span><span class="run-label">Run strategy</span>
+        </button>
+        <div class="downloads">
+          <a href="download/tetris.h" download>
+            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 4v11m0 0 4-4m-4 4-4-4M5 19h14" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></svg>tetris.h</a>
+          <a href="download/basic.cpp" download>
+            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 4v11m0 0 4-4m-4 4-4-4M5 19h14" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></svg>basic.cpp</a>
+        </div>
+      </section>
+
+      <section class="card">
+        <h2>Fumen</h2>
+        <textarea id="fumenInput" rows="3" spellcheck="false" placeholder="Paste a fumen string or URL (v115@…)"></textarea>
+        <div class="btn-row">
+          <button id="loadFumen" type="button">Load</button>
+          <button id="copyFumen" type="button" disabled>Copy game as fumen</button>
+        </div>
+        <a id="openFumen" class="link-btn hidden" target="_blank" rel="noopener">Open in fumen.zui.jp ↗</a>
+        <p id="fumenError" class="error-text hidden"></p>
+      </section>
+    </aside>
+
+    <!-- Stage -->
+    <section class="stage">
+      <div class="stage-head">
+        <div>
+          <div id="frameLabel" class="frame-label">No game loaded</div>
+          <div id="frameSub" class="frame-sub">Run a strategy or paste a fumen to begin.</div>
+        </div>
+        <div id="pcBadge" class="pc-badge">0 PCs</div>
+      </div>
+
+      <div class="playfield">
+        <div class="side">
+          <div class="side-title">Hold</div>
+          <canvas id="holdCanvas" class="mini"></canvas>
+        </div>
+        <div class="board-wrap">
+          <canvas id="board"></canvas>
+          <div id="banner" class="banner"></div>
+        </div>
+        <div class="side">
+          <div class="side-title">Next</div>
+          <canvas id="nextCanvas" class="mini tall"></canvas>
+        </div>
+      </div>
+
+      <div id="frameComment" class="frame-comment hidden"></div>
+
+      <div class="transport">
+        <button data-act="first" title="First (Home)" aria-label="First frame"><svg viewBox="0 0 24 24"><path d="M6 5v14M18 6l-8 6 8 6z" fill="currentColor" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round"/></svg></button>
+        <button data-act="prevPC" title="Previous PC (Shift+←)" aria-label="Previous PC" class="pc-jump">PC</button>
+        <button data-act="prev" title="Previous (←)" aria-label="Previous frame"><svg viewBox="0 0 24 24"><path d="M15 6l-6 6 6 6" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg></button>
+        <button data-act="play" class="play" title="Play / pause (Space)" aria-label="Play">
+          <svg class="i-play" viewBox="0 0 24 24"><path d="M8 5.5v13l10.5-6.5z" fill="currentColor"/></svg>
+          <svg class="i-pause" viewBox="0 0 24 24"><rect x="7" y="5" width="3.5" height="14" rx="1" fill="currentColor"/><rect x="13.5" y="5" width="3.5" height="14" rx="1" fill="currentColor"/></svg>
+        </button>
+        <button data-act="next" title="Next (→)" aria-label="Next frame"><svg viewBox="0 0 24 24"><path d="M9 6l6 6-6 6" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg></button>
+        <button data-act="nextPC" title="Next PC (Shift+→)" aria-label="Next PC" class="pc-jump">PC</button>
+        <button data-act="last" title="Last (End)" aria-label="Last frame"><svg viewBox="0 0 24 24"><path d="M18 5v14M6 6l8 6-8 6z" fill="currentColor" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round"/></svg></button>
+        <select id="speed" title="Playback speed">
+          <option value="2">2 pps</option>
+          <option value="5" selected>5 pps</option>
+          <option value="10">10 pps</option>
+          <option value="25">25 pps</option>
+          <option value="60">60 pps</option>
+        </select>
+      </div>
+      <div class="timeline-wrap">
+        <canvas id="timeline"></canvas>
+      </div>
+    </section>
+
+    <!-- Results -->
+    <aside class="panel right">
+      <section class="card stats">
+        <h2>Result</h2>
+        <div class="big-stat"><span id="statPCs">–</span><small>perfect clears</small></div>
+        <dl class="stat-grid">
+          <div><dt>Pieces placed</dt><dd id="statPlaced">–</dd></div>
+          <div><dt>Pieces / PC</dt><dd id="statRate">–</dd></div>
+          <div><dt>2-line PCs</dt><dd id="stat2">–</dd></div>
+          <div><dt>4-line PCs</dt><dd id="stat4">–</dd></div>
+          <div><dt>Other PCs</dt><dd id="statOther">–</dd></div>
+          <div><dt>Solve time</dt><dd id="statTime">–</dd></div>
+        </dl>
+        <div id="endReason" class="end-reason hidden"></div>
+      </section>
+
+      <section class="card pcs">
+        <h2>Perfect clears</h2>
+        <ol id="pcList" class="pc-list"><li class="empty">None yet</li></ol>
+      </section>
+
+      <section class="card console">
+        <div class="console-head">
+          <h2>Console</h2>
+          <div class="segmented small">
+            <button type="button" data-log="output" class="active">Output</button>
+            <button type="button" data-log="compile">Compiler</button>
+          </div>
+        </div>
+        <pre id="console" class="log">Nothing yet.</pre>
+      </section>
+    </aside>
+  </main>
+
+  <div id="toast" class="toast"></div>
+
+  <script src="js/tetris.js"></script>
+  <script src="js/fumen.js"></script>
+  <script src="js/frames.js"></script>
+  <script src="js/render.js"></script>
+  <script src="js/app.js"></script>
+</body>
+</html>
