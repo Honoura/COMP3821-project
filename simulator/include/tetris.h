@@ -30,6 +30,7 @@
 #include <optional>
 #include <random>
 #include <string>
+#include <unordered_map>
 #include <unordered_set>
 #include <vector>
 
@@ -131,6 +132,31 @@ inline const ShapeTable& shapes() {
     return table;
 }
 
+// Bounding box and per-row bitmasks of each piece/rotation, for fast
+// collision tests: rows[k] holds the cells at dy = minY + k, bit (dx - minX).
+struct ShapeMask {
+    int minX, maxX, minY, maxY;
+    std::array<uint16_t, 4> rows;
+};
+
+inline const std::array<std::array<ShapeMask, 4>, NUM_PIECES>& shapeMasks() {
+    static const auto table = [] {
+        std::array<std::array<ShapeMask, 4>, NUM_PIECES> t{};
+        for (int p = 0; p < NUM_PIECES; ++p)
+            for (int r = 0; r < 4; ++r) {
+                ShapeMask m{9, -9, 9, -9, {}};
+                for (Cell c : shapes()[p][r]) {
+                    m.minX = std::min(m.minX, c.x), m.maxX = std::max(m.maxX, c.x);
+                    m.minY = std::min(m.minY, c.y), m.maxY = std::max(m.maxY, c.y);
+                }
+                for (Cell c : shapes()[p][r]) m.rows[c.y - m.minY] |= uint16_t(1u << (c.x - m.minX));
+                t[p][r] = m;
+            }
+        return t;
+    }();
+    return table;
+}
+
 // SRS offset tables. The kick for test i when rotating a -> b is
 // OFFSET[a][i] - OFFSET[b][i].
 constexpr int JLSTZ_OFFSETS[4][5][2] = {
@@ -176,23 +202,16 @@ struct Placement {
         for (Cell& c : out) c.x += x, c.y += y;
         return out;
     }
-    int minY() const {
-        int m = 1 << 30;
-        for (Cell c : cells()) m = std::min(m, c.y);
-        return m;
-    }
-    int maxY() const {
-        int m = -(1 << 30);
-        for (Cell c : cells()) m = std::max(m, c.y);
-        return m;
-    }
+    const detail::ShapeMask& mask() const { return detail::shapeMasks()[static_cast<int>(piece)][rot & 3]; }
+    int minY() const { return y + mask().minY; }
+    int maxY() const { return y + mask().maxY; }
     // Identifies the set of cells covered, so placements that look the same
     // (e.g. an S in SPAWN vs REVERSE one row apart) compare equal.
     uint64_t key() const {
-        int lo = minY();
+        const detail::ShapeMask& m = mask();
         uint64_t bits = 0;
-        for (Cell c : cells()) bits |= uint64_t(1) << ((c.y - lo) * 10 + c.x);
-        return (uint64_t(lo + 64) << 40) | bits;
+        for (int k = 0; k <= m.maxY - m.minY; ++k) bits |= uint64_t(m.rows[k]) << (x + m.minX + k * 10);
+        return (uint64_t(y + m.minY + 64) << 40) | bits;
     }
     bool sameCells(const Placement& o) const { return key() == o.key(); }
 };
@@ -226,16 +245,24 @@ class Board {
     uint16_t row(int y) const { return rows_[y]; }
 
     bool fits(const Placement& p) const {
-        for (Cell c : p.cells())
-            if (c.x < 0 || c.x >= WIDTH || c.y < 0 || c.y >= HEIGHT || filled(c.x, c.y))
-                return false;
+        const detail::ShapeMask& m = p.mask();
+        int x0 = p.x + m.minX, y0 = p.y + m.minY;
+        if (x0 < 0 || p.x + m.maxX >= WIDTH || y0 < 0 || p.y + m.maxY >= HEIGHT) return false;
+        for (int k = 0; k <= m.maxY - m.minY; ++k)
+            if (rows_[y0 + k] & (m.rows[k] << x0)) return false;
         return true;
     }
 
     // Locks the piece (assumed to fit) and clears full lines. Returns lines cleared.
     int place(const Placement& p) {
-        for (Cell c : p.cells()) set(c.x, c.y);
-        return clearLines();
+        const detail::ShapeMask& m = p.mask();
+        int x0 = p.x + m.minX, y0 = p.y + m.minY, h = m.maxY - m.minY + 1;
+        bool full = false;
+        for (int k = 0; k < h; ++k) {
+            rows_[y0 + k] |= uint16_t(m.rows[k] << x0);
+            full |= rows_[y0 + k] == FULL_ROW;
+        }
+        return full ? clearLines() : 0;  // only rows the piece touched can be full
     }
 
     int clearLines() {
@@ -312,11 +339,11 @@ inline std::optional<Placement> rotate(const Board& board, const Placement& p, i
     return std::nullopt;
 }
 
-// Every distinct resting position of `piece` reachable from spawn by shifts,
-// SRS rotations and soft drops. Positions covering the same cells are only
-// listed once. If maxHeight > 0, placements with any cell at y >= maxHeight
-// are excluded (the "height cap").
-inline std::vector<Placement> legalPlacements(const Board& board, Piece piece, int maxHeight = 0) {
+namespace detail {
+
+// Reference move generator: a plain search over (rotation, x, y) states,
+// starting at spawn. Slow but simple; used for tall stacks and in tests.
+inline std::vector<Placement> legalPlacementsBFS(const Board& board, Piece piece, int maxHeight) {
     std::vector<Placement> out;
     if (piece == Piece::None) return out;
     Placement spawn = spawnPlacement(piece);
@@ -331,34 +358,106 @@ inline std::vector<Placement> legalPlacements(const Board& board, Piece piece, i
         uint8_t& s = seen[index(p)];
         if (!s && board.fits(p)) s = 1, stack.push_back(p);
     };
-
-    // Above the stack every (rotation, column) is reachable directly from
-    // spawn, so seed the search there instead of walking down from row 20.
-    int top = board.height();
-    if (top <= 16) {
-        for (int r = 0; r < 4; ++r) {
-            Placement p{piece, r, 0, 0};
-            int lo = 0;
-            for (Cell c : shape(piece, r)) lo = std::min(lo, c.y);
-            p.y = top - lo;
-            for (p.x = -2; p.x < Board::WIDTH + 2; ++p.x) push(p);
-        }
-    } else {
-        push(spawn);
-    }
-
-    std::unordered_set<uint64_t> keys;
+    push(spawn);
+    std::vector<uint64_t> keys;
     while (!stack.empty()) {
         Placement p = stack.back();
         stack.pop_back();
         push({p.piece, p.rot, p.x - 1, p.y});
         push({p.piece, p.rot, p.x + 1, p.y});
         Placement down{p.piece, p.rot, p.x, p.y - 1};
-        if (board.fits(down)) push(down);
-        else if ((maxHeight <= 0 || p.maxY() < maxHeight) && keys.insert(p.key()).second)
-            out.push_back(p);
+        if (board.fits(down)) {
+            push(down);
+        } else if (maxHeight <= 0 || p.maxY() < maxHeight) {
+            uint64_t k = p.key();
+            if (std::find(keys.begin(), keys.end(), k) == keys.end()) keys.push_back(k), out.push_back(p);
+        }
         for (int dir : {1, -1})
             if (auto q = rotate(board, p, dir)) push(*q);
+    }
+    return out;
+}
+
+}  // namespace detail
+
+// Every distinct resting position of `piece` reachable from spawn by shifts,
+// SRS rotations and soft drops. Positions covering the same cells are only
+// listed once. If maxHeight > 0, placements with any cell at y >= maxHeight
+// are excluded (the "height cap").
+//
+// Works on all 10 columns at once: for each rotation r and centre row y,
+// fit[r][y] has bit x set if the piece fits with its centre at (x, y), and
+// reach[r][y] grows by shifts, soft drops and kicks until nothing changes.
+inline std::vector<Placement> legalPlacements(const Board& board, Piece piece, int maxHeight = 0) {
+    std::vector<Placement> out;
+    if (piece == Piece::None || !board.fits(spawnPlacement(piece))) return out;
+    // Positions at least 3 rows above the stack rotate without kicking (the
+    // largest SRS kick moves 2 rows), so everything from there up is reachable
+    // straight from spawn and the search can start there. That needs room
+    // below spawn; otherwise fall back to the plain search.
+    const int top = board.height();
+    if (top > 12) {
+        out = detail::legalPlacementsBFS(board, piece, maxHeight);
+    } else {
+        constexpr uint16_t ALL = (1u << Board::WIDTH) - 1;
+        constexpr int ROWS = 24;
+        const auto& masks = detail::shapeMasks()[static_cast<int>(piece)];
+        auto shift = [](uint16_t v, int k) -> uint16_t { return k >= 0 ? uint16_t((v << k) & ALL) : uint16_t(v >> -k); };
+        uint16_t fit[4][ROWS], reach[4][ROWS] = {};  // rows <= 12 + 3 + 2 + 3 < ROWS
+        int seedRow[4], rows = 0;
+        for (int r = 0; r < 4; ++r) seedRow[r] = top + 3 - masks[r].minY, rows = std::max(rows, seedRow[r] + 3);
+        for (int r = 0; r < 4; ++r) {
+            for (int y = 0; y < rows; ++y) {
+                uint16_t f = ALL;
+                for (Cell c : shape(piece, r)) {
+                    int yy = y + c.y;
+                    uint16_t empty = yy < 0 ? 0 : yy >= Board::HEIGHT ? ALL : uint16_t(~board.row(yy) & ALL);
+                    f &= shift(empty, -c.x);
+                }
+                fit[r][y] = f;
+            }
+            reach[r][seedRow[r]] = fit[r][seedRow[r]];
+        }
+        for (bool changed = true; changed;) {
+            changed = false;
+            // Shifts and soft drops: one sweep from the top down per rotation.
+            for (int r = 0; r < 4; ++r)
+                for (int y = seedRow[r]; y >= 0; --y) {
+                    uint16_t v = reach[r][y];
+                    if (y < seedRow[r]) v |= reach[r][y + 1] & fit[r][y];
+                    for (uint16_t prev = 0; v != prev;) prev = v, v |= (shift(v, 1) | shift(v, -1)) & fit[r][y];
+                    reach[r][y] = v;
+                }
+            // Rotations: kick test i applies to the sources where tests < i failed.
+            for (int r = 0; r < 4; ++r)
+                for (int to : {rotateCW(r), rotateCCW(r)})
+                    for (int y = 0; y <= seedRow[r]; ++y) {
+                        uint16_t rem = reach[r][y];
+                        for (int t = 0; t < kickCount(piece) && rem; ++t) {
+                            Cell k = kick(piece, r, to, t);
+                            int ty = y + k.y;
+                            if (ty < 0 || ty >= rows) continue;
+                            uint16_t landed = shift(rem, k.x) & fit[to][ty];
+                            rem &= uint16_t(~shift(fit[to][ty], -k.x));
+                            if (ty <= seedRow[to] && (landed & ~reach[to][ty]))
+                                reach[to][ty] |= landed, changed = true;
+                        }
+                    }
+        }
+        std::vector<uint64_t> keys;
+        keys.reserve(48);
+        out.reserve(48);
+        for (int r = 0; r < 4; ++r)
+            for (int y = 0; y <= seedRow[r]; ++y) {
+                uint16_t resting = reach[r][y] & uint16_t(~(y > 0 ? fit[r][y - 1] : 0));
+                if (maxHeight > 0 && y + masks[r].maxY >= maxHeight) continue;
+                for (int x = 0; resting; ++x, resting >>= 1) {
+                    if (!(resting & 1)) continue;
+                    Placement p{piece, r, x, y};
+                    uint64_t k = p.key();
+                    if (std::find(keys.begin(), keys.end(), k) == keys.end()) keys.push_back(k), out.push_back(p);
+                }
+            }
     }
     std::sort(out.begin(), out.end(), [](const Placement& a, const Placement& b) {
         return a.rot != b.rot ? a.rot < b.rot : a.x != b.x ? a.x < b.x : a.y < b.y;
@@ -566,12 +665,12 @@ struct PCSearch {
             if (useHold) {
                 if (hold == Piece::None) {
                     piece = at(n++);
-                    newHold = cur;
                 } else {
                     piece = hold;
-                    newHold = cur;
+                    if (piece == cur) continue;  // swapping equal pieces changes nothing
                 }
-                if (piece == Piece::None || piece == cur) continue;
+                newHold = cur;
+                if (piece == Piece::None) continue;
             }
             Piece newCur = at(n);
             auto options = legalPlacements(board, piece, height);
@@ -595,7 +694,135 @@ struct PCSearch {
     }
 };
 
+// Exhaustive version of PCSearch: finds every piece a PC can leave in hold.
+struct PCEnumerator {
+    const std::vector<Piece>& queue;
+    bool allowHold;
+    long long nodeLimit;
+    long long nodes = 0;
+    bool truncated = false;
+    std::unordered_map<PCSearch::Key, uint8_t, PCSearch::KeyHash> memo = {};
+
+    PCEnumerator(const std::vector<Piece>& q, bool hold, long long limit)
+        : queue(q), allowHold(hold), nodeLimit(limit) {}
+
+    // Bit 0 = empty hold, bit k + 1 = piece k.
+    static uint8_t bit(Piece p) { return uint8_t(1u << (p == Piece::None ? 0 : static_cast<int>(p) + 1)); }
+    Piece at(int i) const { return i < static_cast<int>(queue.size()) ? queue[i] : Piece::None; }
+
+    // Calls visit(move, boardAfter, heightAfter, cur, hold, next) for each
+    // move that keeps a PC possible, until visit returns false.
+    template <class Visit>
+    void forEachMove(const Board& board, Piece cur, Piece hold, int next, int height, Visit visit) {
+        for (int useHold = 0; useHold < (allowHold ? 2 : 1); ++useHold) {
+            Piece piece = cur, newHold = hold;
+            int n = next;
+            if (useHold) {
+                if (hold == Piece::None) {
+                    piece = at(n++);
+                } else {
+                    piece = hold;
+                    if (piece == cur) continue;
+                }
+                newHold = cur;
+                if (piece == Piece::None) continue;
+            }
+            for (const Placement& p : legalPlacements(board, piece, height)) {
+                Board nb = board;
+                int nh = height - nb.place(p);
+                if (!PCSearch::regionsOk(nb, nh)) continue;
+                if (!visit(Move{bool(useHold), p}, nb, nh, at(n), newHold, n + 1)) return;
+            }
+        }
+    }
+
+    // Bitmask of the hold pieces a PC from this state can end with.
+    uint8_t reachable(const Board& board, Piece cur, Piece hold, int next, int height) {
+        if (cur == Piece::None || height <= 0) return 0;
+        PCSearch::Key key{{}, int16_t(next), uint8_t(cur), uint8_t(hold), uint8_t(height)};
+        for (int y = 0; y < height && y < 8; ++y) key.rows[y] = board.row(y);
+        if (auto it = memo.find(key); it != memo.end()) return it->second;
+        if (++nodes > nodeLimit) {
+            truncated = true;
+            return 0;
+        }
+        // Only the held piece, the current piece and the pieces still to be
+        // placed can end up in hold; stop early once all of them are found.
+        int needed = (Board::WIDTH * height - board.count()) / 4;
+        uint8_t possible = bit(hold) | bit(cur);
+        for (int i = 0; i < needed; ++i) possible |= bit(at(next + i));
+        uint8_t mask = 0;
+        forEachMove(board, cur, hold, next, height,
+                    [&](const Move&, const Board& nb, int nh, Piece nc, Piece nhold, int nn) {
+                        mask |= nb.empty() ? bit(nhold) : reachable(nb, nc, nhold, nn, nh);
+                        return mask != possible;
+                    });
+        if (!truncated) memo[key] = mask;
+        return mask;
+    }
+
+    // Appends to `path` a PC that ends with a hold piece in `target`.
+    bool build(const Board& board, Piece cur, Piece hold, int next, int height, uint8_t target,
+               std::vector<Move>& path) {
+        bool found = false;
+        forEachMove(board, cur, hold, next, height,
+                    [&](const Move& m, const Board& nb, int nh, Piece nc, Piece nhold, int nn) {
+                        path.push_back(m);
+                        if (nb.empty() ? (bit(nhold) & target) != 0
+                                       : (reachable(nb, nc, nhold, nn, nh) & target) &&
+                                             build(nb, nc, nhold, nn, nh, target, path)) {
+                            found = true;
+                            return false;
+                        }
+                        path.pop_back();
+                        return true;
+                    });
+        return found;
+    }
+};
+
 }  // namespace detail
+
+// One way to finish a perfect clear: the moves, and what is left in hold.
+struct PCOption {
+    int height;
+    Piece endHold;
+    std::vector<Move> moves;
+};
+
+struct PCOptions {
+    std::vector<PCOption> options;  // at most one per distinct end-hold piece
+    bool complete = true;           // false if the node limit cut the search short
+    long long nodes = 0;
+};
+
+// Every distinct hold piece a PC of exactly `height` lines from the current
+// state can end with, with one move sequence for each. This is what an
+// offline DP over PC boundaries needs: after a PC the board is empty, so the
+// next state is determined by the pieces used and the piece left in hold.
+inline PCOptions perfectClearOptions(const Game& game, int height, long long nodeLimit = 5'000'000) {
+    PCOptions out;
+    const Board& b = game.board();
+    if (game.over() || height <= 0 || height > 6 || b.height() > height) return out;
+    if (game.rules().maxHeight > 0 && height > game.rules().maxHeight) return out;
+    int emptyCells = Board::WIDTH * height - b.count();
+    if (emptyCells <= 0 || emptyCells % 4) return out;
+    if (emptyCells / 4 > 1 + game.remaining() + (game.held() != Piece::None)) return out;
+
+    detail::PCEnumerator search(game.queue(), game.rules().hold, nodeLimit);
+    uint8_t mask = search.reachable(b, game.current(), game.held(), game.taken(), height);
+    for (int k = 0; k <= NUM_PIECES; ++k) {
+        if (!(mask >> k & 1)) continue;
+        Piece endHold = k == 0 ? Piece::None : ALL_PIECES[k - 1];
+        PCOption opt{height, endHold, {}};
+        if (search.build(b, game.current(), game.held(), game.taken(), height,
+                         detail::PCEnumerator::bit(endHold), opt.moves))
+            out.options.push_back(std::move(opt));
+    }
+    out.complete = !search.truncated;
+    out.nodes = search.nodes;
+    return out;
+}
 
 // Searches for a sequence of moves from the current state of `game` that
 // ends with an empty board after clearing exactly `height` lines (counting

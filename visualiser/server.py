@@ -24,9 +24,11 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parent.parent
 PUBLIC = ROOT / "visualiser" / "public"
 SIM = ROOT / "simulator"
+PC_BINARY = ROOT / "perfect-tetris" / "zig-out" / "bin" / "pc"
 DOWNLOADS = {
     "tetris.h": SIM / "include" / "tetris.h",
     "basic.cpp": SIM / "strategies" / "basic.cpp",
+    "dp.cpp": SIM / "strategies" / "dp.cpp",
 }
 MAX_SOURCE_BYTES = 2_000_000
 MAX_LOG_CHARS = 200_000
@@ -57,14 +59,14 @@ def run_strategy(req):
         args += ["--cap", str(int(req["cap"]))]
     if not req.get("hold", True):
         args += ["--no-hold"]
-    timeout = max(1, min(int(req.get("timeout", 60)), 600))
+    timeout = max(1, min(int(req.get("timeout", 300)), 1800))
 
     with tempfile.TemporaryDirectory(prefix="pcvis-") as tmp:
         tmp = Path(tmp)
         (tmp / "strategy.cpp").write_text(source)
         exe = tmp / "run"
         compile_cmd = [
-            CONFIG["cxx"], "-std=c++17", "-O2", "-I", str(SIM / "include"),
+            CONFIG["cxx"], "-std=c++17", "-O2", "-pthread", "-I", str(SIM / "include"),
             str(SIM / "runner" / "runner.cpp"), str(tmp / "strategy.cpp"), "-o", str(exe),
         ]
         t0 = time.monotonic()
@@ -82,8 +84,11 @@ def run_strategy(req):
         out = tmp / "game.json"
         t0 = time.monotonic()
         try:
+            env = dict(os.environ)
+            if PC_BINARY.exists():
+                env.setdefault("PERFECT_TETRIS_PC", str(PC_BINARY))
             proc = subprocess.run([str(exe), *args, "--out", str(out)], capture_output=True, text=True,
-                                  timeout=timeout, cwd=tmp)
+                                  timeout=timeout, cwd=tmp, env=env)
         except subprocess.TimeoutExpired as e:
             def text(b):
                 return b.decode(errors="replace") if isinstance(b, bytes) else (b or "")
@@ -121,7 +126,8 @@ class Handler(SimpleHTTPRequestHandler):
 
     def do_GET(self):
         if self.path == "/api/health":
-            return self.send_json({"ok": True, "cxx": CONFIG["cxx"], "cxxFound": bool(shutil.which(CONFIG["cxx"]))})
+            return self.send_json({"ok": True, "cxx": CONFIG["cxx"], "cxxFound": bool(shutil.which(CONFIG["cxx"])),
+                                   "perfectTetris": PC_BINARY.exists()})
         if self.path.startswith("/download/"):
             name = self.path[len("/download/"):]
             path = DOWNLOADS.get(name)

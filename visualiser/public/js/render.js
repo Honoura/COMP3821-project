@@ -164,17 +164,6 @@
     if (type) drawMiniPiece(ctx, type, horizontal ? 36 : 48, horizontal ? 28 : 36, horizontal ? 13 : 18, dim ? 0.45 : 1);
   }
 
-  // Vertical column beside the board; a horizontal strip on narrow screens.
-  function drawNext(canvas, next) {
-    const horizontal = window.matchMedia('(max-width: 560px)').matches;
-    const ctx = horizontal ? setupCanvas(canvas, 260, 56) : setupCanvas(canvas, 96, 300);
-    next.slice(0, 5).forEach((t, i) => {
-      const s = horizontal ? (i === 0 ? 11 : 9) : i === 0 ? 18 : 15;
-      if (horizontal) drawMiniPiece(ctx, t, 28 + i * 51, 28, s, i === 0 ? 1 : 0.85);
-      else drawMiniPiece(ctx, t, 48, 34 + i * 58, s, i === 0 ? 1 : 0.85);
-    });
-  }
-
   // markers: [{ index, kind: 'l2' | 'l4' | 'other' | 'error' }]
   function drawTimeline(canvas, count, index, markers, hover) {
     const w = canvas.clientWidth;
@@ -222,5 +211,15 @@
     return { indexAt: (px) => Math.round(Math.max(0, Math.min(1, (px - pad) / track)) * (count - 1)) };
   }
 
-  root.Render = { drawBoard, drawHold, drawNext, drawTimeline, COLORS };
+  // Small inline SVG of a piece in spawn orientation, for the key.
+  function pieceSVG(type, s = 7) {
+    const cells = pieceCells(type, 0, 0, 0);
+    const minX = Math.min(...cells.map((c) => c[0])), maxY = Math.max(...cells.map((c) => c[1]));
+    const w = (Math.max(...cells.map((c) => c[0])) - minX + 1) * s, h = (maxY - Math.min(...cells.map((c) => c[1])) + 1) * s;
+    const rects = cells.map(([x, y]) =>
+      `<rect x="${(x - minX) * s + 0.5}" y="${(maxY - y) * s + 0.5}" width="${s - 1}" height="${s - 1}" rx="1.5" fill="${COLORS[type]}"/>`).join('');
+    return `<svg width="${w}" height="${h}" viewBox="0 0 ${w} ${h}" aria-hidden="true">${rects}</svg>`;
+  }
+
+  root.Render = { drawBoard, drawHold, drawTimeline, pieceSVG, COLORS };
 })(window);

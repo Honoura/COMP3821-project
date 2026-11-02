@@ -1,14 +1,14 @@
 // Turns a runner game log or decoded fumen pages into a list of frames for
 // the renderer. A frame is the field before a piece locks plus that piece:
-//   { field, piece, hold, next, comment, clearRows, isPC, pcIndex, pcTotal,
+//   { field, piece, hold, next, nextIndex, comment, clearRows, isPC, pcTotal,
 //     usedHold, label, error }
+// `next` is every upcoming piece; nextIndex is the sequence index of next[0]
+// (null for fumens, whose queue position is unknown).
 (function (root) {
   const isNode = typeof module !== 'undefined' && module.exports;
   const Tet = isNode ? require('./tetris.js') : root.Tet;
   const Fumen = isNode ? require('./fumen.js') : root.Fumen;
   const { Field, pieceId } = Tet;
-
-  const NEXT_SHOWN = 5;
 
   function withPlacement(field, piece) {
     const f = field.copy();
@@ -36,7 +36,8 @@
         field,
         piece,
         hold,
-        next: queue.slice(next, next + NEXT_SHOWN),
+        next: queue.slice(next),
+        nextIndex: next,
         clearRows,
         isPC: m.pc,
         pcTotal: pcs,
@@ -50,7 +51,8 @@
     });
 
     // Final frame: the resulting board, plus the rejected move if any.
-    const last = { field, piece: null, hold, next: queue.slice(next - 1, next - 1 + NEXT_SHOWN), clearRows: [],
+    const left = Math.min(next - 1, queue.length); // the unplaced current piece, if any, comes first
+    const last = { field, piece: null, hold, next: queue.slice(left), nextIndex: left, clearRows: [],
       isPC: false, pcTotal: pcs, usedHold: false, move: game.moves.length, label: 'End' };
     if (game.error) last.error = game.error.message;
     frames.push(last);
@@ -72,7 +74,8 @@
         piece: p.piece,
         lock: p.lock,
         hold: q ? q.hold : 0,
-        next: q ? q.next.slice(0, NEXT_SHOWN) : [],
+        next: q ? q.next.slice() : [],
+        nextIndex: null,
         comment: p.comment,
         clearRows,
         isPC,

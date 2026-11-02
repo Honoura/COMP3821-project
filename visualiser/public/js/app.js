@@ -57,7 +57,8 @@
       const j = await r.json();
       state.online = true;
       el.className = 'server-status online';
-      el.querySelector('.label').textContent = j.cxxFound ? `Runner online · ${j.cxx}` : `Runner online · compiler "${j.cxx}" not found`;
+      el.querySelector('.label').textContent = (j.cxxFound ? `Runner online · ${j.cxx}` : `Runner online · compiler "${j.cxx}" not found`) +
+        (j.perfectTetris ? ' · perfect-tetris' : ' · no perfect-tetris build');
     } catch (e) {
       state.online = false;
       el.className = 'server-status offline';
@@ -108,7 +109,7 @@
       length: Number($('length').value) || 200,
       cap: Number($('cap').value) || 0,
       hold: $('hold').checked,
-      timeout: Number($('timeout').value) || 60,
+      timeout: Number($('timeout').value) || 300,
     };
     if (state.seqMode === 'custom') body.queue = $('customQueue').value;
     else body.seed = Number($('seed').value) || 0;
@@ -302,12 +303,31 @@
     }
 
     Render.drawHold($('holdCanvas'), f.hold, false);
-    Render.drawNext($('nextCanvas'), f.next || []);
+    renderQueue(f);
     document.querySelectorAll('.pc-list button').forEach((b) => {
       b.classList.toggle('current', Number(b.dataset.frame) === i);
     });
     drawFrame();
     drawTimeline();
+  }
+
+  // Every upcoming piece as a letter, with dashed lines at 7-bag boundaries.
+  function renderQueue(f) {
+    const list = $('queueList');
+    const next = (f && f.next) || [];
+    $('queueCount').textContent = next.length ? `· ${next.length}` : '';
+    if (!next.length) {
+      list.innerHTML = '<li class="empty">Empty</li>';
+      return;
+    }
+    list.innerHTML = next.map((t, k) => {
+      const seq = f.nextIndex == null ? null : f.nextIndex + k;
+      const cls = [k === 0 ? 'first' : '', k > 0 && seq != null && seq % 7 === 0 ? 'bag' : ''].join(' ').trim();
+      return `<li class="${cls}"><span class="q-letter" style="background:${Render.COLORS[t]}">${LETTERS[t]}</span>` +
+        `<span class="q-idx">${seq == null ? k + 1 : seq + 1}</span></li>`;
+    }).join('');
+    list.scrollTop = 0;
+    list.scrollLeft = 0;
   }
 
   function drawFrame() {
@@ -329,6 +349,8 @@
     const byWidth = Math.floor((stageW - sideW) / 10);
     const byHeight = Math.floor(Math.min(620, window.innerHeight - 330) / rows);
     state.cell = Math.max(16, Math.min(40, byWidth, Math.max(22, byHeight)));
+    // The queue column matches the board's height (at least ~8 letters tall).
+    $('queueList').style.maxHeight = narrow ? '' : Math.max(rows * state.cell, 250) - 26 + 'px';
     if (state.frames.length) show(state.index, false);
     else Render.drawBoard($('board'), null, { rows, cell: state.cell });
     drawTimeline();
@@ -402,14 +424,15 @@
     window.addEventListener('dragover', (e) => e.preventDefault());
     window.addEventListener('drop', (e) => e.preventDefault());
 
-    $('useExample').addEventListener('click', async () => {
+    document.querySelectorAll('[data-example]').forEach((b) => b.addEventListener('click', async () => {
+      const name = b.dataset.example;
       try {
-        const r = await fetch('source/basic.cpp');
-        setSource((await r.json()).source, 'basic.cpp');
+        const r = await fetch('source/' + name);
+        setSource((await r.json()).source, name);
       } catch (e) {
-        toast('Start visualiser/server.py to load the example', true);
+        toast('Start visualiser/server.py to load the examples', true);
       }
-    });
+    }));
 
     document.querySelectorAll('[data-seq]').forEach((b) => b.addEventListener('click', () => { setSeqMode(b.dataset.seq); saveSettings(); }));
     $('randomSeed').addEventListener('click', () => { $('seed').value = Math.floor(Math.random() * 1e6); saveSettings(); });
@@ -480,7 +503,9 @@
     window.addEventListener('resize', resize);
     resize();
     Render.drawHold($('holdCanvas'), 0);
-    Render.drawNext($('nextCanvas'), []);
+    renderQueue(null);
+    $('legend').innerHTML = [1, 3, 5, 2, 6, 7, 4] // I O T L J S Z
+      .map((t) => `<span><b style="background:${Render.COLORS[t]}">${LETTERS[t]}</b>${Render.pieceSVG(t)}</span>`).join('');
 
     // Allow linking straight to a fumen: index.html#v115@... or ?v115@...
     const linked = /[vmd]11[05]@[A-Za-z0-9+/?]+/.exec(decodeURIComponent(location.hash + location.search));
