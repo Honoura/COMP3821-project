@@ -25,10 +25,12 @@ ROOT = Path(__file__).resolve().parent.parent
 PUBLIC = ROOT / "visualiser" / "public"
 SIM = ROOT / "simulator"
 PC_BINARY = ROOT / "perfect-tetris" / "zig-out" / "bin" / "pc"
+SFINDER_JAR = ROOT / "tools" / "sfinder" / "sfinder.jar"
 DOWNLOADS = {
     "tetris.h": SIM / "include" / "tetris.h",
     "basic.cpp": SIM / "strategies" / "basic.cpp",
     "dp.cpp": SIM / "strategies" / "dp.cpp",
+    "sfinder_dp.cpp": SIM / "strategies" / "sfinder_dp.cpp",
 }
 MAX_SOURCE_BYTES = 2_000_000
 MAX_LOG_CHARS = 200_000
@@ -87,6 +89,8 @@ def run_strategy(req):
             env = dict(os.environ)
             if PC_BINARY.exists():
                 env.setdefault("PERFECT_TETRIS_PC", str(PC_BINARY))
+            if SFINDER_JAR.exists():
+                env.setdefault("SFINDER_JAR", str(SFINDER_JAR))
             proc = subprocess.run([str(exe), *args, "--out", str(out)], capture_output=True, text=True,
                                   timeout=timeout, cwd=tmp, env=env)
         except subprocess.TimeoutExpired as e:

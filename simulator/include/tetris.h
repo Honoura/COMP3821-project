@@ -630,27 +630,24 @@ struct PCSearch {
     PCSearch(const std::vector<Piece>& q, bool hold, long long limit)
         : queue(q), allowHold(hold), nodeLimit(limit) {}
 
-    // Necessary condition: every connected region of empty cells below the
-    // PC line must be filled by whole pieces, so its size is a multiple of 4.
+    // Necessary condition: a completely filled column stays filled through
+    // line clears (each clear removes one cell from every column), so no
+    // piece can cross it, and the empty cells on each side must be filled by
+    // whole pieces: their counts are multiples of 4. (Enclosed holes are NOT
+    // dead: clearing the lines above can open them up again.)
     static bool regionsOk(const Board& b, int height) {
-        uint64_t open = 0;
-        for (int y = 0; y < height; ++y)
-            open |= uint64_t(~b.row(y) & Board::FULL_ROW) << (y * Board::WIDTH);
-        while (open) {
-            uint64_t region = open & (~open + 1), prev = 0;
-            while (region != prev) {
-                prev = region;
-                uint64_t grow = region | (region << Board::WIDTH) | (region >> Board::WIDTH);
-                grow |= ((region << 1) & ~COL0) | ((region >> 1) & ~COL9);
-                region = grow & open;
+        int run = 0;
+        for (int x = 0; x < Board::WIDTH; ++x) {
+            int empty = 0;
+            for (int y = 0; y < height; ++y) empty += !b.filled(x, y);
+            if (empty == 0) {
+                if (run % 4) return false;
+                run = 0;
             }
-            if (__builtin_popcountll(region) % 4) return false;
-            open &= ~region;
+            run += empty;
         }
-        return true;
+        return run % 4 == 0;
     }
-    static constexpr uint64_t COL0 = 0x0004010040100401ull;  // x = 0 in rows 0..5
-    static constexpr uint64_t COL9 = COL0 << 9;
 
     bool dfs(const Board& board, Piece cur, Piece hold, int next, int height) {
         if (cur == Piece::None || height <= 0) return false;
@@ -683,6 +680,7 @@ struct PCSearch {
                 int cleared = nb.place(p);
                 int nh = height - cleared;
                 if (!regionsOk(nb, nh)) continue;
+                if (nb.empty() && nh > 0) continue;  // a shorter PC, not one of this height
                 path.push_back({bool(useHold), p});
                 if (nb.empty() || dfs(nb, newCur, newHold, n + 1, nh)) return true;
                 path.pop_back();
@@ -730,6 +728,7 @@ struct PCEnumerator {
             for (const Placement& p : legalPlacements(board, piece, height)) {
                 Board nb = board;
                 int nh = height - nb.place(p);
+                if (nb.empty() && nh > 0) continue;  // a shorter PC, not one of this height
                 if (!PCSearch::regionsOk(nb, nh)) continue;
                 if (!visit(Move{bool(useHold), p}, nb, nh, at(n), newHold, n + 1)) return;
             }
