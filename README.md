@@ -11,7 +11,10 @@ simulator/
   strategies/basic.cpp    example greedy strategy (myopic baseline)
   include/perfect_tetris.h  calls the perfect-tetris solver from a strategy
   strategies/dp.cpp       exact offline DP over PC boundaries, perfect-tetris as PC checker
-  strategies/dp_builtin.cpp  same DP using tetris.h's own PC search (cross-check)
+  strategies/dp_builtin.cpp  same DP using tetris.h's own PC search (slow; cross-check)
+  strategies/sfinder_dp.cpp  DP with solution-finder finding the PC options
+  include/sfinder.h       solution-finder wrapper (path/percent, solution -> moves)
+tools/fetch-sfinder.sh    downloads solution-finder into tools/sfinder/
 visualiser/
   server.py               local server: web UI + compiles/runs uploaded strategies
   public/                 the web UI (board, timeline, fumen import/export)
@@ -29,6 +32,14 @@ cd perfect-tetris && zig build -Doptimize=ReleaseFast   # -> zig-out/bin/pc
 
 The server finds it automatically; from the command line set
 `PERFECT_TETRIS_PC` or run from inside the repo.
+
+## Getting solution-finder
+
+`sfinder_dp.cpp` needs Java 8+ and solution-finder:
+
+```bash
+./tools/fetch-sfinder.sh      # -> tools/sfinder/sfinder.jar
+```
 
 ## Visualiser
 
@@ -106,7 +117,8 @@ c++ -std=c++17 -O2 -pthread -Iinclude runner/runner.cpp strategies/dp.cpp -o run
 | --- | --- | --- | --- |
 | `basic.cpp` | take the shortest PC available, else place greedily | 19, 20, 20, 20 | < 1 s |
 | `dp.cpp` | exact DP over (pieces placed, hold) states; every (height, end hold) combination checked with perfect-tetris | 21 (seed 1) | ~80 s on 8 threads |
-| `dp_builtin.cpp` | the same DP using `perfectClearOptions` from `tetris.h` | 21, 21, 20, 21 | ~17–20 s on 8 threads |
+| `sfinder_dp.cpp` | same DP; sfinder lists 2-line PCs and decides 4-line options, perfect-tetris supplies 4-line moves | 21 (seed 1) | ~5 min on 8 threads |
+| `dp_builtin.cpp` | the same DP using `perfectClearOptions` from `tetris.h` | — | too slow since its search was made sound |
 
 `dp.cpp` stops after its last PC, so it reports "strategy stopped" with a few
 pieces unplaced.
