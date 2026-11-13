@@ -130,7 +130,7 @@ c++ -std=c++17 -O2 -pthread -Iinclude runner/runner.cpp strategies/dp.cpp -o run
 | Strategy | Idea | Seeds 1–4 (PCs) | Time |
 | --- | --- | --- | --- |
 | `basic.cpp` | take the shortest PC available, else place greedily | 19, 20, 20, 20 | < 1 s |
-| `dp.cpp` | exact DP over (pieces placed, hold) states; every (height, end hold) combination checked with perfect-tetris | 21 (seed 1) | ~80 s on 8 threads |
+| `dp.cpp` | exact DP over (pieces placed, hold) states; every (height, end hold) combination checked with perfect-tetris, and the hold-free case by `online.h`'s search | 20, 21, 21, 19 | ~20 s on 16 threads (4-54 s over seeds 1-50) |
 | `sfinder_dp.cpp` | same DP; sfinder lists 2-line PCs and decides 4-line options, perfect-tetris supplies 4-line moves | 21 (seed 1) | ~5 min on 8 threads |
 | `dp_builtin.cpp` | the same DP using `perfectClearOptions` from `tetris.h` | — | too slow since its search was made sound |
 | `dp_search.cpp` | same DP as `dp.cpp`; the PC checker is the exhaustive search of `online.h`, with no limits | 20, 21, 21, 19 | ~85 s on 1 thread |
@@ -251,13 +251,41 @@ Results on seeds 1-50, 200 pieces:
 tables from the two CSV files.
 
 **Check of the offline optima.** `dp_search.cpp` was run on seeds 1-50
-(about 85 s per seed on one core). It agrees with `dp.cpp` (the report's
-per-seed table) on 49 seeds, in the number of PCs and the 2-/4-line mix. On
-**seed 38** `dp.cpp` reported 19 PCs and `dp_search.cpp` finds 20: twenty
-4-line PCs that place all 200 pieces and never use hold. The runner verifies
-that plan (`./run_dp --seed 38`). `results/offline_50.csv` records 20. Why
-`dp.cpp` misses it is not known yet; it is the only plan that ends on the last
-piece of the sequence with the hold slot empty.
+(about 85 s per seed on one core). It first agreed with `dp.cpp` on 49 seeds
+and disagreed on **seed 38**, where `dp.cpp` reported 19 PCs and
+`dp_search.cpp` found 20: twenty 4-line PCs that place all 200 pieces and
+never use hold.
+
+That turned out to be a gap in `dp.cpp`, now fixed. It listed the PCs out of a
+state by asking perfect-tetris for each end-hold piece (`-s I` ... `-s Z`)
+plus one unconstrained query, and **there is no way to ask perfect-tetris for
+a PC that leaves the hold slot empty**: `-s` names a piece to leave in hold,
+and without `-s` the solver returns whichever solution it finds first. So that
+edge was only ever found by luck -- on seed 38 the only hold-empty boundary
+state the DP ever reached was the start.
+
+It matters because a PC that never touches hold draws exactly 5H/2 pieces, one
+fewer than any other. In the middle of a sequence this is free: the state it
+reaches, `(placed, empty)`, has the same pieces ahead of it as
+`(placed, next piece)`, so the two have the same future. At the end of the
+queue the spare piece is the difference between fitting one more PC and not,
+which is exactly seed 38. `dp.cpp` now also runs `online.h`'s exhaustive
+hold-free search from every state whose hold slot is empty; it has no node
+budget, so a "no" from it is a proof and the DP stays exact.
+
+The same search is the only one used when the rules disable hold, which fixes
+`--no-hold` as well: it used to report 0 PCs on every seed, because every
+answer perfect-tetris gave pressed hold and was rejected on replay. It now
+finds plans again (60 pieces, `--no-hold`, seeds 2-7: 6, 3, 1, 6, 6, 6).
+
+With that, `dp.cpp` reproduces `results/offline_50.csv` on all 50 seeds --
+the PC count and the 2-/4-line mix -- in about 20 s per seed on 16 cores, with
+no query timing out. Across the 50 seeds it runs 1025 hold-free searches, and
+the runner verifies every plan. Fourteen of the seeds now show a replay
+rejection: that is perfect-tetris answering the unconstrained query at the end
+of the queue with a solution that places the held piece last, which would need
+a piece the sequence does not have -- the answer that used to crowd out the
+real one.
 
 **Checks.**
 

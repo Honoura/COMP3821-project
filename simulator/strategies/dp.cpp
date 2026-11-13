@@ -9,14 +9,31 @@
 //     PC height  in {2, 4}
 //     end hold   in {any, I, O, T, L, J, S, Z}
 //
-// giving each query only enough pieces for a PC of that height, so the answer
-// is an H-line PC or nothing. Each answer is an edge to a later state
-// (pieces placed + 5H/2, end hold). Edges only go forward, so
+// and, from a state whose hold slot is empty, we also search for a PC that
+// leaves it empty (see below). Each query gets only enough pieces for a PC of
+// that height, so the answer is an H-line PC or nothing. Each answer is an
+// edge to a later state (pieces placed + 5H/2, end hold). Edges only go
+// forward, so
 //
 //     best(s') = max over edges s -> s' of best(s) + 1
 //
 // is filled in order of pieces placed, and the state with the largest best()
 // gives the maximum number of PCs. Pieces after the final PC are not placed.
+//
+// perfect-tetris cannot be asked for a PC that leaves the hold slot *empty*:
+// -s names a piece to leave in hold, and without -s the solver returns
+// whichever solution it finds first, which is almost never the hold-free one.
+// That case has to be covered separately, because a PC that never touches
+// hold draws exactly 5H/2 pieces, one fewer than any other, so a hold-free
+// line stays a piece ahead of every other line for the rest of the sequence.
+// In the middle of the sequence this costs nothing -- the state it reaches,
+// (placed, empty), has the same pieces ahead of it as (placed, next piece),
+// so the two have the same future -- but at the end of the queue that spare
+// piece decides whether one more PC fits. (Seed 38 is such a sequence: its
+// optimum is twenty 4-line PCs that place all 200 pieces and never hold.)
+// These edges come from the exhaustive hold-free search of online.h, which
+// has no node budget, so a "no" from it is a proof. When the rules disable
+// hold altogether it is the only search used.
 //
 // Before each query, Lemma 2.3 is applied as a pruning rule: the pieces a PC
 // places are the hold, current and next pieces minus the one left over, and
@@ -25,9 +42,11 @@
 // prove there are none, so this removes most of the slow queries.
 //
 // Every (state, height, end hold) query runs as its own perfect-tetris process
-// with a time limit, on all cores; a state's queries start as soon as the
-// state is discovered. Every answer is replayed through
-// Game::play(), so a solution that is illegal under our rules is rejected.
+// with a time limit, on all cores; a state's queries and hold-free searches
+// start as soon as the state is discovered. Every answer is replayed through
+// Game::play(), so a solution that is illegal under our rules is rejected
+// (perfect-tetris may place the hold piece last, which needs a piece we do
+// not have when the queue runs out).
 // The result is exact if no query times out (reported on stderr).
 // Needs the `pc` binary (see perfect_tetris.h).
 //
@@ -46,6 +65,7 @@
 #include <mutex>
 #include <thread>
 
+#include "online.h"
 #include "perfect_tetris.h"
 #include "tetris.h"
 
@@ -71,8 +91,9 @@ struct Edge {
     std::vector<Move> moves;
 };
 
-// One perfect-tetris query: a state, a height and an end-hold piece
-// (Piece::None = any).
+// One PC question about a state: a height and what the PC leaves in hold.
+// saveIndex >= 0 is a perfect-tetris query for SAVES[saveIndex] (Piece::None =
+// any piece); saveIndex == NO_HOLD is the hold-free search of online.h.
 struct Task {
     State state;
     int height;
@@ -81,25 +102,28 @@ struct Task {
     PerfectTetris::Query query;
 };
 
+constexpr int NO_HOLD = -1;
 constexpr Piece SAVES[] = {Piece::None, Piece::I, Piece::O, Piece::T, Piece::L, Piece::J, Piece::S, Piece::Z};
 
 // Lemma 2.3: a PC from an empty board uses an even number of L, J and
 // vertical T pieces. A T can always be turned flat or vertical, so this only
-// rules out piece sets with no T and an odd number of L and J. `window` is the
-// hold, current and next pieces the PC can draw from; it places all of them
-// except `leftOver` (Piece::None = any one of them).
+// rules out piece sets with no T and an odd number of L and J. The PC places
+// every piece of `pieces` except the one at `skip` (pieces.size() = all of them).
+bool parityOk(const std::vector<Piece>& pieces, size_t skip) {
+    int t = 0, lj = 0;
+    for (size_t i = 0; i < pieces.size(); ++i) {
+        if (i == skip) continue;
+        t += pieces[i] == Piece::T;
+        lj += pieces[i] == Piece::L || pieces[i] == Piece::J;
+    }
+    return t > 0 || lj % 2 == 0;
+}
+
+// `window` is the hold, current and next pieces the PC can draw from; it
+// places all of them except `leftOver` (Piece::None = any one of them).
 bool parityAllows(const std::vector<Piece>& window, Piece leftOver) {
-    auto ok = [&](size_t skip) {
-        int t = 0, lj = 0;
-        for (size_t i = 0; i < window.size(); ++i) {
-            if (i == skip) continue;
-            t += window[i] == Piece::T;
-            lj += window[i] == Piece::L || window[i] == Piece::J;
-        }
-        return t > 0 || lj % 2 == 0;
-    };
     for (size_t i = 0; i < window.size(); ++i)
-        if ((leftOver == Piece::None || window[i] == leftOver) && ok(i)) return true;
+        if ((leftOver == Piece::None || window[i] == leftOver) && parityOk(window, i)) return true;
     return false;
 }
 
@@ -116,6 +140,17 @@ std::optional<PerfectTetris::Query> queryFor(const Game& game, int height) {
     for (int k = 0; static_cast<int>(q.queue.size()) + hasHold < placements + 2 && game.peek(k) != Piece::None; ++k)
         q.queue.push_back(game.peek(k));
     return q;
+}
+
+// The pieces an H-line PC places when it never touches the hold slot: the
+// current piece and the next 5H/2 - 1, in queue order. Only possible from a
+// state whose hold slot is already empty, since hold never empties again.
+std::optional<std::vector<Piece>> holdFreePieces(const Game& game, int height) {
+    int placements = 5 * height / 2;
+    if (game.held() != Piece::None || 1 + game.remaining() < placements) return std::nullopt;
+    std::vector<Piece> pieces{game.current()};
+    for (Piece p : game.preview(placements - 1)) pieces.push_back(p);
+    return pieces;
 }
 
 }  // namespace
@@ -135,13 +170,18 @@ std::vector<Move> solve(const Game& start) {
     std::deque<Task> work;
     std::map<State, bool> seen;
     std::map<std::pair<State, State>, std::pair<int, Edge>> found;  // (from, to) -> (priority, edge)
-    int states = 0, queries = 0, solved = 0, pruned = 0, timedOut = 0, rejected = 0, active = 0;
+    int states = 0, queries = 0, searches = 0, solved = 0, pruned = 0, timedOut = 0, rejected = 0, active = 0;
     std::string error;
 
     // Queues every query for a newly reached state that passes the parity check.
     auto addState = [&](State s, const Game& game) {
         ++states;
         for (int height : HEIGHTS) {
+            if (auto pieces = holdFreePieces(game, height)) {  // the PC places all of them, none left over
+                if (parityOk(*pieces, pieces->size())) work.push_back({s, height, NO_HOLD, game, {}});
+                else ++pruned;
+            }
+            if (!game.rules().hold) continue;  // then every PC is hold-free; nothing to ask
             auto q = queryFor(game, height);
             if (!q) continue;
             std::vector<Piece> window;  // the pieces the PC can draw from
@@ -167,26 +207,42 @@ std::vector<Move> solve(const Game& start) {
             ++active;
             lock.unlock();
 
-            Piece save = SAVES[task.saveIndex];
+            Piece save = task.saveIndex == NO_HOLD ? Piece::None : SAVES[task.saveIndex];
             PerfectTetris::Answer answer;
             std::string failure;
             std::optional<std::vector<Move>> moves;
             Game next = task.game;
-            try {
-                answer = solver.solve({task.query}, task.height, save, QUERY_TIMEOUT_SEC)[0];
-            } catch (const std::exception& e) {
-                failure = e.what();
+            if (task.saveIndex == NO_HOLD) {
+                int placements = 5 * task.height / 2;
+                online::PCAnswer a =
+                    online::findPC(task.game.board(), Piece::None, task.game.current(),
+                                   task.game.preview(placements - 1), task.height, {Piece::None}, 1, 0,
+                                   task.game.rules().hold);
+                if (!a.ends.empty()) {
+                    answer.status = PerfectTetris::Status::Solved;
+                    moves = std::move(a.ends[0].moves);
+                }
+            } else {
+                try {
+                    answer = solver.solve({task.query}, task.height, save, QUERY_TIMEOUT_SEC)[0];
+                } catch (const std::exception& e) {
+                    failure = e.what();
+                }
+                if (answer.status == PerfectTetris::Status::Solved) {
+                    std::optional<Piece> want = save == Piece::None ? std::nullopt : std::optional<Piece>(save);
+                    moves = replayPlacements(task.game, answer.placements, want);
+                }
             }
-            if (answer.status == PerfectTetris::Status::Solved) {
-                std::optional<Piece> want = save == Piece::None ? std::nullopt : std::optional<Piece>(save);
-                moves = replayPlacements(task.game, answer.placements, want);
-                if (moves)
-                    for (const Move& m : *moves) next.playUnchecked(m);
-            }
+            if (moves)  // every answer is checked against our own rules
+                for (const Move& m : *moves)
+                    if (!next.play(m)) {
+                        moves.reset();
+                        break;
+                    }
 
             lock.lock();
             --active;
-            ++queries;
+            ++(task.saveIndex == NO_HOLD ? searches : queries);
             if (!failure.empty()) error = failure;
             if (answer.status == PerfectTetris::Status::TimedOut) {
                 ++timedOut;
@@ -200,7 +256,7 @@ std::vector<Move> solve(const Game& start) {
                     ++rejected;
                 } else {
                     State to{next.placed(), holdIndex(next.held())};
-                    int priority = task.height * 8 + task.saveIndex;
+                    int priority = task.height * 9 + task.saveIndex + 1;  // the hold-free edge first
                     auto key = std::make_pair(task.state, to);
                     auto it = found.find(key);
                     if (it == found.end() || priority < it->second.first)
@@ -251,9 +307,9 @@ std::vector<Move> solve(const Game& start) {
     double ms = std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - t0).count();
     std::cerr << "dp: " << best[end] << " perfect clears (" << two << " two-line, " << four << " four-line)\n"
               << "dp: " << states << " boundary states, " << edges.size() << " distinct PC transitions\n"
-              << "dp: perfect-tetris: " << queries << " queries (" << pruned << " more skipped by the parity lemma), "
-              << solved << " solved, " << rejected << " rejected by replay, " << threads << " threads, "
-              << static_cast<long long>(ms) << " ms\n";
+              << "dp: " << queries << " perfect-tetris queries and " << searches << " hold-free searches ("
+              << pruned << " more skipped by the parity lemma), " << solved << " solved, " << rejected
+              << " rejected by replay, " << threads << " threads, " << static_cast<long long>(ms) << " ms\n";
     if (timedOut) std::cerr << "dp: " << timedOut << " queries timed out; the result may not be optimal\n";
 
     // Optional: write the number of further PCs possible from every boundary

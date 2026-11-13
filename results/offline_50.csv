@@ -1,7 +1,9 @@
 # Offline results on the 200-piece 7-bag sequences with seeds 1-50: greedy baseline (basic.cpp) and
-# exact DP, with the DP's 2- and 4-line PCs. Values are those of the report's per-seed table (dp.cpp),
-# re-derived with dp_search.cpp. All agree except seed 38, where dp.cpp reported 19 (0/19) and
-# dp_search.cpp found a verified plan with 20 PCs (0/20, hold never used); 20 is recorded here.
+# exact DP, with the DP's 2- and 4-line PCs. dp.cpp and dp_search.cpp use different PC checkers and
+# now agree on all 50 seeds (mean 20.84 against the greedy 19.38); no query timed out, so every row
+# is exact. The report's original table differed on seed 38 only, where dp.cpp reported 19 because
+# it never asked for a PC that leaves the hold slot empty. With that search added it also finds the
+# 20-PC plan (0/20, hold never used, all 200 pieces placed).
 seed,greedy,dp,dp_two_line,dp_four_line
 1,19,20,2,18
 2,19,21,4,17
