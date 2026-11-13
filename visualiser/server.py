@@ -31,6 +31,9 @@ DOWNLOADS = {
     "basic.cpp": SIM / "strategies" / "basic.cpp",
     "dp.cpp": SIM / "strategies" / "dp.cpp",
     "sfinder_dp.cpp": SIM / "strategies" / "sfinder_dp.cpp",
+    "online_myopic.cpp": SIM / "strategies" / "online_myopic.cpp",
+    "online_value.cpp": SIM / "strategies" / "online_value.cpp",
+    "online.h": SIM / "include" / "online.h",
 }
 MAX_SOURCE_BYTES = 2_000_000
 MAX_LOG_CHARS = 200_000

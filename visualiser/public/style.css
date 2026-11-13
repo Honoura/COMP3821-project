@@ -160,7 +160,7 @@ button:disabled { opacity: 0.45; cursor: not-allowed; }
 .dz-title { font-weight: 500; overflow-wrap: anywhere; }
 .dz-sub { font-size: 12px; color: var(--muted); }
 
-.examples { display: flex; align-items: baseline; gap: 10px; font-size: 12px; }
+.examples { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 10px; font-size: 12px; }
 .downloads { display: flex; gap: 6px; }
 .downloads a {
   flex: 1; display: flex; align-items: center; justify-content: center; gap: 6px;
@@ -219,6 +219,10 @@ canvas.mini { width: 96px; height: 72px; background: var(--bg-2); border: 1px so
 .queue-list li.first .q-idx { color: #c3cbff; font-weight: 600; }
 .queue-list li.bag { margin-top: 5px; position: relative; }
 .queue-list li.bag::before { content: ''; position: absolute; left: 4px; right: 4px; top: -4.5px; border-top: 1px dashed var(--line-2); }
+/* Pieces a limited-vision strategy could not see yet (game.rules.vision). */
+.queue-list li.unseen .q-letter, .queue-list li.unseen .q-idx { opacity: 0.3; }
+.queue-list li.unseen-first { margin-top: 14px; position: relative; }
+.queue-list li.unseen-first::after { content: 'not seen'; position: absolute; left: 3px; top: -13px; font-size: 9.5px; color: var(--muted); white-space: nowrap; }
 .queue-list li.empty { color: var(--faint); font-size: 12px; justify-content: center; padding: 8px 0; }
 .board-wrap { position: relative; min-width: 0; }
 #board {
@@ -314,6 +318,8 @@ canvas.mini { width: 96px; height: 72px; background: var(--bg-2); border: 1px so
   .queue-list { flex-direction: row; width: auto; flex: 1; overflow-x: auto; overflow-y: hidden; max-height: none !important; }
   .queue-list li { flex-direction: column; padding: 2px; gap: 2px; }
   .queue-list li.bag { margin: 0 0 0 5px; }
+  .queue-list li.unseen-first { margin: 0 0 0 8px; }
+  .queue-list li.unseen-first::after { display: none; }
   .queue-list li.bag::before { left: -4.5px; right: auto; top: 4px; bottom: 4px; border-top: none; border-left: 1px dashed var(--line-2); }
   .transport button { width: 34px; height: 34px; }
   .transport select { margin-left: 0; }
