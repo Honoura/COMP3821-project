@@ -1,0 +1,12 @@
+# Ablation: no fitted values. Every state has the same value, except that holding I, J, L or O
+# (the pieces a 2-line PC can use) is worth 0.05 PCs more than holding T, S or Z.
+# First number: alpha (PCs per piece). Then theta: one row per held piece
+# (I, O, T, L, J, S, Z), one column per bag offset 0..6.
+0.10903
+-0.7788 -0.7788 -0.7788 -0.7788 -0.7788 -0.7788 -0.7788   # I
+-0.7788 -0.7788 -0.7788 -0.7788 -0.7788 -0.7788 -0.7788   # O
+-0.8288 -0.8288 -0.8288 -0.8288 -0.8288 -0.8288 -0.8288   # T
+-0.7788 -0.7788 -0.7788 -0.7788 -0.7788 -0.7788 -0.7788   # L
+-0.7788 -0.7788 -0.7788 -0.7788 -0.7788 -0.7788 -0.7788   # J
+-0.8288 -0.8288 -0.8288 -0.8288 -0.8288 -0.8288 -0.8288   # S
+-0.8288 -0.8288 -0.8288 -0.8288 -0.8288 -0.8288 -0.8288   # Z

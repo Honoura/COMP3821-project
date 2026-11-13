@@ -30,9 +30,15 @@
 // Game::play(), so a solution that is illegal under our rules is rejected.
 // The result is exact if no query times out (reported on stderr).
 // Needs the `pc` binary (see perfect_tetris.h).
+//
+// With DP_DUMP=<file> set, it also writes how many further PCs are possible
+// from every boundary state reached; tools/fit_value.py fits the online value
+// table to these.
 
 #include <algorithm>
 #include <chrono>
+#include <cstdlib>
+#include <fstream>
 #include <iostream>
 #include <condition_variable>
 #include <deque>
@@ -249,5 +255,28 @@ std::vector<Move> solve(const Game& start) {
               << solved << " solved, " << rejected << " rejected by replay, " << threads << " threads, "
               << static_cast<long long>(ms) << " ms\n";
     if (timedOut) std::cerr << "dp: " << timedOut << " queries timed out; the result may not be optimal\n";
+
+    // Optional: write the number of further PCs possible from every boundary
+    // state reached, as training data for the online value table
+    // (tools/fit_value.py). Set DP_DUMP to the file to write.
+    if (const char* dump = std::getenv("DP_DUMP"); dump && *dump) {
+        // Edges are sorted by source and only go forward, so one backward pass
+        // gives further[s] = max over edges s -> t of 1 + further[t].
+        std::map<State, int> further;
+        for (auto it = edges.rbegin(); it != edges.rend(); ++it)
+            further[it->from] = std::max(further[it->from], 1 + further[it->to]);
+        std::ofstream out(dump);
+        out << "{\"queue\":\"" << queueToString(start.queue()) << "\",\"optimum\":" << best[end]
+            << ",\"timedOut\":" << timedOut << ",\"values\":[";
+        bool first = true;
+        for (auto& [s, pcs] : best) {  // every state reachable from the start
+            (void)pcs;
+            out << (first ? "" : ",") << "[" << s.placed + (s.hold != 0) << ",\""
+                << (s.hold ? std::string(1, toChar(ALL_PIECES[s.hold - 1])) : "") << "\"," << further[s] << "]";
+            first = false;
+        }
+        out << "]}\n";
+        std::cerr << "dp: wrote " << best.size() << " state values to " << dump << "\n";
+    }
     return moves;
 }

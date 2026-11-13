@@ -96,6 +96,14 @@ inline std::vector<Piece> sevenBag(uint64_t seed, int length) {
 // Position within the current 7-bag after `taken` pieces have been drawn.
 inline int bagPosition(int taken) { return taken % 7; }
 
+// How many upcoming pieces the strategy allowed itself to see: 0 means the
+// whole queue (the offline setting). Limited-vision strategies set this (see
+// online.h) so that the runner can record it in the game log.
+inline int& declaredVision() {
+    static int vision = 0;
+    return vision;
+}
+
 struct Cell {
     int x, y;
 };

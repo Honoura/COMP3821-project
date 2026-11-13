@@ -131,7 +131,8 @@ int main(int argc, char** argv) {
     out << "{\"queue\":" << jsonString(queueToString(queue)) << ",\"seed\":";
     if (haveSeed && queueArg.empty()) out << seed;
     else out << "null";
-    out << ",\"rules\":{\"hold\":" << (rules.hold ? "true" : "false") << ",\"cap\":" << rules.maxHeight << "}"
+    out << ",\"rules\":{\"hold\":" << (rules.hold ? "true" : "false") << ",\"cap\":" << rules.maxHeight
+        << ",\"vision\":" << declaredVision() << "}"
         << ",\"moves\":[" << movesJson.str() << "]"
         << ",\"pcs\":[" << pcsJson.str() << "]"
         << ",\"returned\":" << moves.size() << ",\"placed\":" << game.placed() << ",\"pcCount\":" << game.pcCount()

@@ -1,0 +1,13 @@
+# Value table fitted to the offline optimum by tools/fit_value.py: 7583 boundary states of
+# 39 sequences (seeds 1001 onwards), solved exactly by simulator/strategies/dp_search.cpp.
+# This is the table in simulator/include/value_table.h.
+# First number: alpha (PCs per piece). Then theta: one row per held piece
+# (I, O, T, L, J, S, Z), one column per bag offset 0..6.
+0.10736
+-0.7156 -0.7067 -0.7555 -0.6817 -0.6776 -0.6652 -0.7214   # I
+-0.6549 -0.6382 -0.7694 -0.6703 -0.6583 -0.6514 -0.6330   # O
+-0.7004 -0.6862 -0.7136 -0.6858 -0.7086 -0.6794 -0.7159   # T
+-0.7080 -0.6930 -0.6791 -0.6635 -0.7091 -0.6652 -0.7159   # L
+-0.7080 -0.6930 -0.6999 -0.6760 -0.6838 -0.6791 -0.7159   # J
+-0.7156 -0.6999 -0.7832 -0.7045 -0.7089 -0.6790 -0.7214   # S
+-0.7156 -0.7067 -0.7832 -0.7045 -0.7088 -0.6791 -0.7214   # Z

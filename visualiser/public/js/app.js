@@ -171,6 +171,9 @@
     $('stat4').textContent = count(4);
     $('statOther').textContent = pcs.length - count(2) - count(4);
     $('statTime').textContent = formatMs(game.solveMs);
+    // Header tag: which setting the strategy played in.
+    const vision = game.rules && game.rules.vision;
+    $('settingTag').textContent = `${vision ? `online · sees ${vision} ahead` : 'offline'} · ${game.queue.length} pieces`;
 
     const end = $('endReason');
     end.classList.remove('hidden');
@@ -179,7 +182,8 @@
     end.textContent = game.error
       ? `Stopped at piece ${game.error.move + 1}: ${game.error.message}`
       : `Ended: ${game.endReason}` + (game.seed != null ? ` · seed ${game.seed}` : '') +
-        (game.rules.cap ? ` · cap ${game.rules.cap}` : '') + (game.rules.hold ? '' : ' · no hold');
+        (game.rules.cap ? ` · cap ${game.rules.cap}` : '') + (game.rules.hold ? '' : ' · no hold') +
+        (game.rules.vision ? ` · sees ${game.rules.vision} pieces ahead` : '');
 
     $('copyFumen').disabled = false;
     $('openFumen').classList.add('hidden');
@@ -201,6 +205,7 @@
     stop();
     $('fumenError').classList.add('hidden');
     state.game = null;
+    $('settingTag').textContent = 'fumen';
     state.frames = frames;
     computeMarkers();
     const pcs = [...state.pcLines.values()];
@@ -320,9 +325,12 @@
       list.innerHTML = '<li class="empty">Empty</li>';
       return;
     }
+    // A limited-vision strategy only saw the first `vision` of these.
+    const vision = state.game && state.game.rules ? state.game.rules.vision || 0 : 0;
     list.innerHTML = next.map((t, k) => {
       const seq = f.nextIndex == null ? null : f.nextIndex + k;
-      const cls = [k === 0 ? 'first' : '', k > 0 && seq != null && seq % 7 === 0 ? 'bag' : ''].join(' ').trim();
+      const cls = [k === 0 ? 'first' : '', k > 0 && seq != null && seq % 7 === 0 ? 'bag' : '',
+        vision && k >= vision ? 'unseen' : '', vision && k === vision ? 'unseen-first' : ''].join(' ').trim();
       return `<li class="${cls}"><span class="q-letter" style="background:${Render.COLORS[t]}">${LETTERS[t]}</span>` +
         `<span class="q-idx">${seq == null ? k + 1 : seq + 1}</span></li>`;
     }).join('');
